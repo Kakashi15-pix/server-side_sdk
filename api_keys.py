@@ -17,8 +17,6 @@ DEFAULT_TTL_DAYS = 30
 
 @dataclass(frozen=True)
 class ApiKeyRecord:
-    """Canonical shape for persisted API key rows."""
-
     id: UUID
     user_id: UUID
     key_hash: str
@@ -39,8 +37,6 @@ class CreatedApiKey:
 
 @dataclass(frozen=True)
 class RotationResult:
-    """Return value for rotation with a short grace window on the old key."""
-
     new_key: CreatedApiKey
     rotated_from: ApiKeyRecord
 
@@ -61,23 +57,20 @@ class ApiKeyRepository(Protocol):
     ) -> ApiKeyRecord:
         """Persist a new key and return the stored record."""
 
-    async def get_api_key_by_id(self, api_key_id: UUID) -> Optional[ApiKeyRecord]:
-        """Load one key by primary key."""
+async def get_api_key_by_id(self, api_key_id: UUID) -> Optional[ApiKeyRecord]:
 
-    async def revoke_api_key(self, api_key_id: UUID) -> ApiKeyRecord:
-        """Mark a key revoked immediately."""
+ async def revoke_api_key(self, api_key_id: UUID) -> ApiKeyRecord:
 
-    async def update_api_key_expiry(self, api_key_id: UUID, expires_at: datetime) -> ApiKeyRecord:
-        """Extend or shorten the expiry window for rotation grace periods."""
+  async def update_api_key_expiry(self, api_key_id: UUID, expires_at: datetime) -> ApiKeyRecord:
 
-    async def touch_last_used(self, api_key_id: UUID, last_used: datetime) -> None:
-        """Persist last_used asynchronously."""
+   async def touch_last_used(self, api_key_id: UUID, last_used: datetime) -> None:
 
 
-class ApiKeyService:
-    """Service that creates, revokes, and rotates API keys."""
 
-    def __init__(
+    class ApiKeyService:
+    
+
+     def __init__(
         self,
         repository: ApiKeyRepository,
         *,

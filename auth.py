@@ -47,12 +47,12 @@ class ApiKeyRecordLike(Protocol):
 
 @runtime_checkable
 class ApiKeyLookupService(Protocol):
-    """Backend contract used by the FastAPI dependency."""
+
 
     async def get_api_key_by_hash(self, key_hash: str) -> Optional[ApiKeyRecordLike]:
-        """Return a matching key record or None."""
+       
 
-    async def touch_last_used(self, api_key_id: UUID) -> None:
+     async def touch_last_used(self, api_key_id: UUID) -> None:
         """Persist last_used asynchronously without blocking the request path."""
 
 

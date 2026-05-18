@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Upstream pricing source
 LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
-PRICING_SYNC_INTERVAL_HOURS = 24
+PRICING_SYNC_INTERVAL_HOURS = 336  # 14 days
 PRICING_CACHE_PATH = Path(__file__).parent / "pricing_cache.json"
 PRICING_SYNC_STATE_PATH = Path(__file__).parent / "pricing_sync.json"
 
@@ -27,8 +27,14 @@ class PricingManager:
 
     def __init__(self):
         self.pricing_data: Dict[str, Dict[str, Any]] = {}
+        self.custom_pricing_data: Dict[str, Dict[str, Any]] = {}
         self.sync_state = self._load_sync_state()
         self._load_pricing()
+        
+        # Initial cold start sync if no cache exists
+        if not self.pricing_data:
+            logger.info("No local pricing cache found. Forcing initial sync from LiteLLM.")
+            self.sync_from_upstream()
 
     def _load_sync_state(self) -> Dict[str, Any]:
        
@@ -114,18 +120,7 @@ class PricingManager:
             except Exception as e:
                 logger.debug(f"Failed to load pricing cache: {e}")
 
-        # Fallback to bundled pricing
-        bundled_path = Path(__file__).parent / "pricing.json"
-        if bundled_path.exists():
-            try:
-                with open(bundled_path) as f:
-                    self.pricing_data = json.load(f)
-                logger.debug("Loaded pricing from bundled file")
-                return
-            except Exception as e:
-                logger.error(f"Failed to load bundled pricing: {e}")
-
-        logger.warning("No pricing data available")
+        logger.warning("No pricing data available in cache")
         self.pricing_data = {}
 
     def _save_cache(self) -> None:
@@ -148,6 +143,15 @@ class PricingManager:
             Pricing dict with input_cost_per_1m_tokens, output_cost_per_1m_tokens, etc.
             None if model not found.
         """
+        if self.custom_pricing_data:
+            if model in self.custom_pricing_data:
+                return self.custom_pricing_data[model]
+
+            if provider:
+                provider_model = f"{provider}/{model}"
+                if provider_model in self.custom_pricing_data:
+                    return self.custom_pricing_data[provider_model]
+
         if not self.pricing_data:
             return None
 
@@ -163,6 +167,48 @@ class PricingManager:
 
         logger.warning(f"Pricing not found for model: {model}")
         return None
+
+    def set_custom_pricing(
+        self,
+        *,
+        model: str,
+        provider: Optional[str] = None,
+        input_cost_per_1m_tokens: float,
+        output_cost_per_1m_tokens: float,
+        cache_creation_cost_per_1m_tokens: Optional[float] = None,
+        cache_read_cost_per_1m_tokens: Optional[float] = None,
+        source: Optional[str] = None,
+        currency: str = "USD",
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Register a client-specific pricing override.
+
+        This is the custom-pricing path for onboarding flows where the client
+        provides their own rates (for example, from historical invoices).
+        The override is checked before falling back to LiteLLM pricing.
+        """
+        pricing_entry: Dict[str, Any] = {
+            "input_cost_per_1m_tokens": input_cost_per_1m_tokens,
+            "output_cost_per_1m_tokens": output_cost_per_1m_tokens,
+            "currency": currency,
+        }
+
+        if cache_creation_cost_per_1m_tokens is not None:
+            pricing_entry["cache_creation_cost_per_1m_tokens"] = cache_creation_cost_per_1m_tokens
+        if cache_read_cost_per_1m_tokens is not None:
+            pricing_entry["cache_read_cost_per_1m_tokens"] = cache_read_cost_per_1m_tokens
+        if source is not None:
+            pricing_entry["source"] = source
+
+        self.custom_pricing_data[model] = pricing_entry
+        if provider:
+            self.custom_pricing_data[f"{provider}/{model}"] = pricing_entry
+
+        return {
+            "model": model,
+            "provider": provider,
+            "pricing": pricing_entry,
+        }
 
     def update_from_response(self, data: Dict[str, Any]) -> None:
         """Update pricing cache from upstream data."""
