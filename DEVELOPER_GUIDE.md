@@ -26,6 +26,22 @@ This file is the server-side quick index. For cross-repo context, also read:
 5. Middleware applies key bucket first, then user fallback.
 6. BackendPricingOrchestrator transforms buffered request details into costed analytics records.
 
+## 3.1) Pricing Manager (backend)
+
+The server hosts the authoritative `PricingManager` which handles upstream
+sync, local caching and pricing lookups. Key defaults (see
+`server-side_sdk/manager.py`):
+
+- Upstream source: https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+- Default sync interval: 336 hours (14 days)
+- Cache path: `server-side_sdk/pricing_cache.json`
+- Sync state path: `server-side_sdk/pricing_sync.json`
+
+The `BackendPricingOrchestrator` ties the interceptor buffer → extractor →
+pricing manager → persistence flow. When making changes to pricing sync or
+fallback logic, update `manager.py` and add tests covering network failures
+and initial cold-start behavior.
+
 ## 4) Security rules
 
 1. Never store raw keys.
