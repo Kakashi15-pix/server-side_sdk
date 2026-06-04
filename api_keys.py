@@ -57,20 +57,23 @@ class ApiKeyRepository(Protocol):
     ) -> ApiKeyRecord:
         """Persist a new key and return the stored record."""
 
-async def get_api_key_by_id(self, api_key_id: UUID) -> Optional[ApiKeyRecord]:
+    async def get_api_key_by_id(self, api_key_id: UUID) -> Optional[ApiKeyRecord]:
+        """Fetch one API key record by primary key."""
 
- async def revoke_api_key(self, api_key_id: UUID) -> ApiKeyRecord:
+    async def revoke_api_key(self, api_key_id: UUID) -> ApiKeyRecord:
+        """Mark an API key as revoked."""
 
-  async def update_api_key_expiry(self, api_key_id: UUID, expires_at: datetime) -> ApiKeyRecord:
+    async def update_api_key_expiry(self, api_key_id: UUID, expires_at: datetime) -> ApiKeyRecord:
+        """Update the expiry timestamp used for grace-period rotation."""
 
-   async def touch_last_used(self, api_key_id: UUID, last_used: datetime) -> None:
+    async def touch_last_used(self, api_key_id: UUID, last_used: datetime) -> None:
+        """Persist the latest usage timestamp."""
 
 
+class ApiKeyService:
+    """Business logic for dashboard-issued API keys stored in the database."""
 
-    class ApiKeyService:
-    
-
-     def __init__(
+    def __init__(
         self,
         repository: ApiKeyRepository,
         *,
