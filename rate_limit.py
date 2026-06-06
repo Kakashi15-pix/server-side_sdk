@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
+from typing import Dict, Optional, Protocol, Tuple, runtime_checkable
 
 from fastapi import HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,15 +32,63 @@ class RateLimitBackend(Protocol):
         """Consume quota for a given identity bucket."""
 
 
+@dataclass
+class _TokenBucket:
+    capacity: int
+    refill_rate: float
+    tokens: float
+    last_refill: float
+
+    def consume(self, cost: int = 1) -> bool:
+        now = time.monotonic()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.refill_rate)
+        self.last_refill = now
+
+        if self.tokens >= cost:
+            self.tokens -= cost
+            return True
+        return False
+
+
+class InMemoryRateLimitBackend:
+    """Pure FastAPI-friendly token bucket backend with no external dependencies."""
+
+    def __init__(self, capacity: int = 60, refill_rate: float = 1.0) -> None:
+        self.capacity = capacity
+        self.refill_rate = refill_rate
+        self._buckets: Dict[Tuple[str, str], _TokenBucket] = {}
+        self._lock = threading.RLock()
+
+    async def allow(self, *, scope: str, identifier: str, cost: int = 1) -> bool:
+        with self._lock:
+            bucket = self._buckets.get((scope, identifier))
+            if bucket is None:
+                bucket = _TokenBucket(
+                    capacity=self.capacity,
+                    refill_rate=self.refill_rate,
+                    tokens=float(self.capacity),
+                    last_refill=time.monotonic(),
+                )
+                self._buckets[(scope, identifier)] = bucket
+
+            return bucket.consume(cost=cost)
+
+
 class KeyThenUserRateLimitMiddleware(BaseHTTPMiddleware):
     """Enforce primary per-key limits before falling back to per-user limits.
 
     The middleware expects auth context to be attached earlier in the request flow.
     """
 
-    def __init__(self, app, backend: RateLimitBackend, cost: int = 1) -> None:
+    def __init__(
+        self,
+        app,
+        backend: Optional[RateLimitBackend] = None,
+        cost: int = 1,
+    ) -> None:
         super().__init__(app)
-        self.backend = backend
+        self.backend = backend or InMemoryRateLimitBackend()
         self.cost = cost
 
     async def dispatch(self, request: Request, call_next) -> Response:

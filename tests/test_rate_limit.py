@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from starlette.responses import Response
 
 from auth import AuthContext
-from rate_limit import KeyThenUserRateLimitMiddleware
+from rate_limit import InMemoryRateLimitBackend, KeyThenUserRateLimitMiddleware
 
 
 class _Backend:
@@ -93,3 +93,13 @@ def test_dispatch_raises_429_when_rate_limited():
 
     assert exc.value.status_code == 429
     assert exc.value.detail["error"] == "rate_limited"
+
+
+def test_in_memory_backend_consumes_and_exhausts_quota():
+    backend = InMemoryRateLimitBackend(capacity=1, refill_rate=0)
+
+    first = asyncio.run(backend.allow(scope="api_key", identifier="key-1", cost=1))
+    second = asyncio.run(backend.allow(scope="api_key", identifier="key-1", cost=1))
+
+    assert first is True
+    assert second is False
