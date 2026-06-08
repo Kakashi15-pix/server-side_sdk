@@ -4,14 +4,12 @@ Implements signal-plus-pull model with primary upstream sync and local fallback.
 """
 import json
 import hashlib
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Callable
 from pathlib import Path
 import requests
 import logging
-
-from pricing.extractors import get_extractor, CostBreakdown
-from pricing.aggregator import RequestDetails, RequestDetailsBuffer, get_request_buffer
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +18,41 @@ LITELLM_PRICING_URL = "https://raw.githubusercontent.com/BerriAI/litellm/main/mo
 PRICING_SYNC_INTERVAL_HOURS = 336  # 14 days
 PRICING_CACHE_PATH = Path(__file__).parent / "pricing_cache.json"
 PRICING_SYNC_STATE_PATH = Path(__file__).parent / "pricing_sync.json"
+
+
+@dataclass
+class RequestDetails:
+    """SDK telemetry request details received by the backend."""
+
+    timestamp: datetime
+    request_id: str
+    model: str
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    stop_reason: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CostBreakdown:
+    """Backend-computed usage and cost breakdown."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    input_cost: float = 0.0
+    output_cost: float = 0.0
+    cache_creation_cost: float = 0.0
+    cache_read_cost: float = 0.0
+    total_cost: float = 0.0
+    model: str = ""
+    provider: str = ""
+    stop_reason: Optional[str] = None
+    raw_usage: Dict[str, Any] = field(default_factory=dict)
 
 
 class PricingManager:
@@ -236,11 +269,10 @@ class BackendPricingOrchestrator:
         self.pricing_manager = pricing_manager or get_pricing_manager()
         self.on_persist = on_persist
 
-    def register_buffer(self, buffer: Optional[RequestDetailsBuffer] = None) -> RequestDetailsBuffer:
+    def register_buffer(self, buffer: Any) -> Any:
         """Attach this orchestrator to a request buffer flush callback."""
-        request_buffer = buffer or get_request_buffer()
-        request_buffer.set_on_flush(self.process_batch)
-        return request_buffer
+        buffer.set_on_flush(self.process_batch)
+        return buffer
 
     def process_batch(self, batch: List[RequestDetails]) -> List[Dict[str, Any]]:
         """Process a flushed request batch and optionally persist it."""
@@ -271,20 +303,18 @@ class BackendPricingOrchestrator:
         metadata = request.metadata or {}
         raw_response = metadata.get("raw_response") if isinstance(metadata, dict) else None
 
-        extractor = get_extractor(provider)
-        if extractor and isinstance(raw_response, dict):
-            extracted_usage = extractor.extract_usage(raw_response)
+        if isinstance(raw_response, dict):
+            extracted_usage = self._extract_usage(raw_response)
             if extracted_usage:
                 usage = extracted_usage
 
-            extracted_model = extractor.extract_model(raw_response)
+            extracted_model = raw_response.get("model")
             if extracted_model:
                 model = extracted_model
 
-            if hasattr(extractor, "extract_stop_reason"):
-                extracted_stop_reason = extractor.extract_stop_reason(raw_response)
-                if extracted_stop_reason:
-                    stop_reason = extracted_stop_reason
+            extracted_stop_reason = raw_response.get("stop_reason")
+            if extracted_stop_reason:
+                stop_reason = extracted_stop_reason
 
         pricing = self.pricing_manager.get_pricing(model, provider=provider) or {}
         breakdown = CostBreakdown(
@@ -322,6 +352,25 @@ class BackendPricingOrchestrator:
                 "total_cost": breakdown.total_cost,
             },
             "metadata": metadata,
+        }
+
+    def _extract_usage(self, response: Dict[str, Any]) -> Optional[Dict[str, int]]:
+        """Extract common usage fields from an optional raw provider response."""
+        usage_obj = response.get("usage")
+        if not isinstance(usage_obj, dict):
+            return None
+
+        return {
+            "input_tokens": usage_obj.get("input_tokens", usage_obj.get("prompt_tokens", 0)),
+            "output_tokens": usage_obj.get("output_tokens", usage_obj.get("completion_tokens", 0)),
+            "cache_creation_tokens": usage_obj.get(
+                "cache_creation_tokens",
+                usage_obj.get("cache_creation_input_tokens", 0),
+            ),
+            "cache_read_tokens": usage_obj.get(
+                "cache_read_tokens",
+                usage_obj.get("cache_read_input_tokens", usage_obj.get("cached_prompt_tokens", 0)),
+            ),
         }
 
     def _compute_cost(

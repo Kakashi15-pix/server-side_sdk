@@ -2,15 +2,24 @@
 
 from datetime import datetime
 
-from pricing.aggregator import RequestDetails
-from pricing.manager import BackendPricingOrchestrator, get_pricing_manager
+from manager import BackendPricingOrchestrator, RequestDetails
+
+
+class _PricingManager:
+    def get_pricing(self, model, provider=None):
+        return {
+            "input_cost_per_1m_tokens": 3.0,
+            "output_cost_per_1m_tokens": 15.0,
+            "cache_creation_cost_per_1m_tokens": 3.75,
+            "cache_read_cost_per_1m_tokens": 0.3,
+        }
 
 
 class TestBackendPricingOrchestrator:
     """Test backend request processing orchestration."""
 
     def test_process_request_with_raw_response_extraction(self):
-        orchestrator = BackendPricingOrchestrator(pricing_manager=get_pricing_manager())
+        orchestrator = BackendPricingOrchestrator(pricing_manager=_PricingManager())
 
         request = RequestDetails(
             timestamp=datetime.utcnow(),
@@ -44,7 +53,7 @@ class TestBackendPricingOrchestrator:
         assert record["cost"]["total_cost"] > 0
 
     def test_process_request_without_raw_response_uses_fallback_usage(self):
-        orchestrator = BackendPricingOrchestrator(pricing_manager=get_pricing_manager())
+        orchestrator = BackendPricingOrchestrator(pricing_manager=_PricingManager())
 
         request = RequestDetails(
             timestamp=datetime.utcnow(),
@@ -70,7 +79,7 @@ class TestBackendPricingOrchestrator:
             persisted.extend(records)
 
         orchestrator = BackendPricingOrchestrator(
-            pricing_manager=get_pricing_manager(),
+            pricing_manager=_PricingManager(),
             on_persist=on_persist,
         )
 
